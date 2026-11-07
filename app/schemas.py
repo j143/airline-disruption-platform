@@ -18,6 +18,22 @@ class BookingResponse(BaseModel):
     booking_id: str
     pnr: str
     status: str
+    passenger_ids: list[str]
+
+
+class FlightInstanceCreate(BaseModel):
+    flight_number: str
+    origin: str
+    destination: str
+    scheduled_departure: datetime
+    seat_numbers: list[str] = Field(min_length=1)
+
+
+class FlightInstanceResponse(BaseModel):
+    instance_id: str
+    flight_number: str
+    operational_status: str
+    seat_numbers: list[str]
 
 
 class SeatHoldRequest(BaseModel):

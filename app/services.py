@@ -14,12 +14,55 @@ def generate_pnr() -> str:
     return "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
 
 
+async def create_flight_instance(
+    session: AsyncSession,
+    flight_number: str,
+    origin: str,
+    destination: str,
+    scheduled_departure: datetime,
+    seat_numbers: list[str],
+) -> FlightInstance:
+    instance = FlightInstance(
+        flight_number=flight_number,
+        origin=origin,
+        destination=destination,
+        scheduled_departure=scheduled_departure,
+        operational_status="SCHEDULED",
+    )
+    session.add(instance)
+    await session.flush()
+
+    for seat_number in seat_numbers:
+        session.add(
+            Seat(
+                flight_instance_id=instance.instance_id,
+                seat_number=seat_number,
+                seat_class="ECONOMY",
+            )
+        )
+
+    record_event(
+        session,
+        "flight_instance.created",
+        "FlightInstance",
+        instance.instance_id,
+        {
+            "flight_number": flight_number,
+            "origin": origin,
+            "destination": destination,
+            "seat_numbers": seat_numbers,
+        },
+    )
+    await session.commit()
+    return instance
+
+
 async def create_booking(
     session: AsyncSession,
     flight_instance_id: str,
     passengers: list[dict],
     fare_class: str = "ECONOMY",
-) -> Booking:
+) -> tuple[Booking, list[str]]:
     instance = await session.get(FlightInstance, flight_instance_id)
     if instance is None:
         raise ValueError("flight instance not found")
@@ -30,6 +73,7 @@ async def create_booking(
     session.add(booking)
     await session.flush()
 
+    passenger_ids: list[str] = []
     for item in passengers:
         passenger = Passenger(
             booking_id=booking.booking_id,
@@ -39,6 +83,7 @@ async def create_booking(
         )
         session.add(passenger)
         await session.flush()
+        passenger_ids.append(passenger.passenger_id)
 
         session.add(
             Ticket(
@@ -55,10 +100,14 @@ async def create_booking(
         "booking.created",
         "Booking",
         booking.booking_id,
-        {"pnr": booking.pnr, "flight_instance_id": flight_instance_id},
+        {
+            "pnr": booking.pnr,
+            "flight_instance_id": flight_instance_id,
+            "passenger_ids": passenger_ids,
+        },
     )
     await session.commit()
-    return booking
+    return booking, passenger_ids
 
 
 async def hold_seat(
@@ -87,6 +136,7 @@ async def hold_seat(
     if existing is not None:
         if existing.status == "HELD" and existing.hold_expires_at and existing.hold_expires_at < datetime.now(timezone.utc):
             existing.status = "RELEASED"
+            await session.flush()
         else:
             raise ValueError("seat already held or assigned")
 

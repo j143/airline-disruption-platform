@@ -5,6 +5,8 @@ from .core import get_session
 from .schemas import (
     BookingCreate,
     BookingResponse,
+    FlightInstanceCreate,
+    FlightInstanceResponse,
     PaymentRequest,
     PaymentResponse,
     RebookingRequest,
@@ -12,9 +14,38 @@ from .schemas import (
     SeatHoldRequest,
     SeatHoldResponse,
 )
-from .services import accept_rebooking, authorize_payment, cancel_flight, create_booking, hold_seat
+from .services import (
+    accept_rebooking,
+    authorize_payment,
+    cancel_flight,
+    create_booking,
+    create_flight_instance,
+    hold_seat,
+)
 
 router = APIRouter()
+
+
+@router.post("/v1/flight-instances", response_model=FlightInstanceResponse, status_code=201)
+async def create_flight_instance_api(
+    request: FlightInstanceCreate,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    session: AsyncSession = Depends(get_session),
+):
+    instance = await create_flight_instance(
+        session,
+        request.flight_number,
+        request.origin,
+        request.destination,
+        request.scheduled_departure,
+        request.seat_numbers,
+    )
+    return FlightInstanceResponse(
+        instance_id=instance.instance_id,
+        flight_number=instance.flight_number,
+        operational_status=instance.operational_status,
+        seat_numbers=request.seat_numbers,
+    )
 
 
 @router.post("/v1/bookings", response_model=BookingResponse, status_code=201)
@@ -24,7 +55,7 @@ async def create_booking_api(
     session: AsyncSession = Depends(get_session),
 ):
     try:
-        booking = await create_booking(
+        booking, passenger_ids = await create_booking(
             session,
             request.flight_instance_id,
             [item.model_dump() for item in request.passengers],
@@ -36,6 +67,7 @@ async def create_booking_api(
         booking_id=booking.booking_id,
         pnr=booking.pnr,
         status=booking.status,
+        passenger_ids=passenger_ids,
     )
 
 
